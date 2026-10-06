@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gran DT - Simulador</title>
+<link rel="stylesheet" href="granDT.css">
+</head>
+<body>
+<header>
+  <h1>Gran DT</h1>
+  <span id="status">Cargá JUGADORES.csv y SALARIOS.csv para empezar</span>
+  <label class="btn">Cargar CSV (jugadores y salarios)<input type="file" id="csvInput" accept=".csv" multiple hidden></label>
+</header>
+
+<main>
+  <section id="field">
+    <div id="pitch"></div>
+    <div id="bench"></div>
+    <div id="bar">
+      <div class="teamName"><small>ARMÁ TU EQUIPO</small><input id="teamName" value="Mi equipo"></div>
+      <button id="formationBtn" class="light"></button>
+      <button id="confirmBtn" disabled>Confirmar equipo</button>
+    </div>
+    <p id="message"></p>
+  </section>
+
+  <aside id="market">
+    <div class="stats">
+      <div><small>PRESUPUESTO</small><b id="budget"></b></div>
+      <div><small>JUGADORES</small><b id="count"></b></div>
+    </div>
+    <h2>Seleccioná tus jugadores</h2>
+    <input id="search" placeholder="Buscar por apellido">
+    <div id="groupFilters">
+      <button class="GK" data-group="GK">ARQ</button>
+      <button class="DEF" data-group="DEF">DEF</button>
+      <button class="MID" data-group="MID">VOL</button>
+      <button class="FWD" data-group="FWD">DEL</button>
+    </div>
+    <div class="selects">
+      <select id="clubSelect"></select>
+      <select id="sortSelect">
+        <option value="name">Orden alfabético</option>
+        <option value="high">Cotización más alta</option>
+        <option value="low">Cotización más baja</option>
+      </select>
+    </div>
+    <small id="listInfo"></small>
+    <ul id="playerList"></ul>
+  </aside>
+</main>
+
+<dialog id="formationDialog">
+  <h3>Cambio de táctica</h3>
+  <div id="formationGrid"></div>
+</dialog>
+
+<script src="granDT.js"></script>
+</body>
+</html>

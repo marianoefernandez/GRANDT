@@ -1,0 +1,60 @@
+:root { --GK:#f08a24; --DEF:#2f6fe4; --MID:#2e9d4f; --FWD:#d8403a; --ink:#1b2340; --line:#dfe3ee; --accent:#3d5af1; }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.4 system-ui, sans-serif; color:var(--ink); background:#f3f4f8; }
+.GK { --c: var(--GK); } .DEF { --c: var(--DEF); } .MID { --c: var(--MID); } .FWD { --c: var(--FWD); }
+
+header { display:flex; gap:12px; align-items:center; padding:10px 16px; background:#14102b; color:#fff; }
+header h1 { margin:0 auto 0 0; font-size:18px; }
+#status { font-size:13px; opacity:.85; }
+.btn, button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 14px; font:inherit; font-weight:600; cursor:pointer; }
+button:disabled { opacity:.4; cursor:default; }
+button.light { background:#e4e9fd; color:var(--accent); }
+
+main { display:grid; grid-template-columns:1fr 380px; height:calc(100vh - 52px); }
+
+/* ----- cancha ----- */
+#field { display:flex; flex-direction:column; gap:10px; padding:12px; overflow:auto;
+  background:repeating-linear-gradient(#5b9a58 0 70px, #53914f 70px 140px); }
+#pitch { flex:1; display:flex; flex-direction:column; justify-content:space-around; gap:10px; }
+.row { display:flex; justify-content:center; gap:14px; flex-wrap:wrap; }
+.slot { position:relative; width:104px; min-height:68px; padding:8px 4px; display:flex; flex-direction:column;
+  justify-content:center; text-align:center; font-weight:700; color:#fff; cursor:pointer;
+  background:color-mix(in srgb, var(--c) 80%, transparent); border:2px dashed rgba(255,255,255,.85); border-radius:8px; }
+.slot.filled { background:#fff; color:var(--ink); border:2px solid var(--c); cursor:default; }
+.slot .name { font-size:13px; } .slot .club { font-size:11px; font-weight:400; opacity:.75; }
+.slot .del, .slot .cap { position:absolute; top:-9px; width:22px; height:22px; padding:0; border-radius:50%; font-size:12px; }
+.slot .del { right:-9px; background:#444; } .slot .cap { left:-9px; background:#999; }
+.slot .cap.on { background:#f2b705; color:#000; }
+#bench { background:rgba(0,0,0,.45); border-radius:10px; padding:8px; color:#fff; }
+#bench h3 { margin:0 0 8px; font-size:12px; text-align:center; letter-spacing:1px; }
+#bar { display:flex; gap:10px; align-items:center; padding:10px 14px; background:#fff; border-radius:12px; }
+.teamName { margin-right:auto; display:flex; flex-direction:column; }
+.teamName small { color:#888; } .teamName input { border:0; font:700 18px system-ui; width:200px; }
+#message { margin:0; min-height:20px; color:#fff; font-weight:600; text-shadow:0 1px 2px #000; }
+
+/* ----- mercado ----- */
+#market { display:flex; flex-direction:column; gap:8px; padding:12px; background:#fff; overflow:hidden; }
+.stats { display:flex; gap:24px; } .stats div { display:flex; flex-direction:column; } .stats b { font-size:20px; }
+small { color:#888; }
+#market h2 { margin:4px 0; font-size:17px; }
+#market input, #market select { padding:8px; border:1px solid var(--line); border-radius:8px; font:inherit; width:100%; }
+#groupFilters, .selects { display:flex; gap:8px; }
+#groupFilters button { flex:1; background:#fff; color:var(--c); border:2px solid var(--c); }
+#groupFilters button.active { background:var(--c); color:#fff; }
+#playerList { list-style:none; margin:0; padding:0; overflow-y:auto; flex:1; }
+#playerList li { display:flex; gap:10px; align-items:center; padding:8px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
+#playerList li:hover { background:#f3f5ff; } #playerList li.picked { opacity:.4; }
+.shirt { width:34px; height:34px; flex:none; background:var(--c); border-radius:10px 10px 4px 4px; }
+.info { flex:1; } .info b { display:block; } .info small { display:block; }
+.price { font-weight:700; }
+
+dialog { border:0; border-radius:14px; padding:20px; }
+dialog::backdrop { background:rgba(0,0,0,.5); }
+#formationGrid { display:grid; grid-template-columns:repeat(3, 120px); gap:10px; }
+#formationGrid button { background:#fff; color:#000; border:2px solid var(--line); padding:10px; }
+#formationGrid button.active { border-color:var(--accent); }
+.dots { display:flex; flex-direction:column; align-items:center; gap:3px; margin-top:6px; }
+.dots span { display:flex; gap:4px; } .dots i { width:7px; height:7px; border-radius:50%; background:var(--accent); }
+
+.ovr { min-width:30px; padding:2px 6px; text-align:center; font-weight:800; color:#fff; background:var(--c); border-radius:6px; }
+.slot .ovr { align-self:center; margin-top:3px; font-size:12px; }

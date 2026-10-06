@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PES 6 Option File Editor</title>
+<link rel="stylesheet" href="index.css">
+</head>
+<body>
+<header>
+  <h1>PES 6 Option File Editor</h1>
+  <span id="status">Abrí un option file para empezar</span>
+  <label class="btn">Abrir option file<input type="file" id="fileInput" hidden></label>
+  <button id="saveBtn" disabled>Descargar option file</button>
+  <button id="csvBtn" disabled title="Primero abrí un option file">Aplicar CSV y descargar</button>
+  <input type="file" id="csvInput" accept=".csv" hidden>
+  <button id="prueba">PROBAR</button>
+
+</header>
+<main id="app" hidden>
+  <aside>
+    <select id="teamSelect"></select>
+    <ol id="squad" style="padding:0"></ol>
+  </aside>
+  <section id="editor"><p>Elegí un jugador del plantel.</p></section>
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
