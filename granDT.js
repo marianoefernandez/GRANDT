@@ -154,6 +154,25 @@ function changeFormation(formation) {          // al cambiar, se reubican los ju
 }
 
 /* =====================================================================
+ * EXPORTAR EL EQUIPO A EQUIPO.csv
+ * Copia las 100 columnas de cada jugador tal cual, y cambia SOLO estas:
+ *   ID -> 4000, 4001, ... (arquero titular, defensores, volantes, delanteros, y después el banco)
+ *   CLUB TEAM -> Team A | INTERNATIONAL NUMBER -> 0 | CLASSIC NUMBER -> 0
+ * ===================================================================== */
+const FIRST_TEAM_ID = 4000;
+
+function buildTeamCsv() {
+  const players = state.slots.map(slot => slot.player);       // el orden de los slots es el orden de los IDs
+  const headers = Object.keys(players[0].raw);                 // mismas columnas y orden que JUGADORES.csv
+  const rows = players.map((player, i) => {
+    const row = { ...player.raw, "ID": FIRST_TEAM_ID + i, "CLUB TEAM": "Team A",
+                  "INTERNATIONAL NUMBER": 0, "CLASSIC NUMBER": 0 };
+    return headers.map(header => row[header]).join(",");
+  });
+  return [headers.join(","), ...rows].join("\r\n") + "\r\n";
+}
+
+/* =====================================================================
  * 4. INTERFAZ
  * ===================================================================== */
 const $ = id => document.getElementById(id);
@@ -199,7 +218,7 @@ function slotElement(slot) {
   }
   const box = el("div", `slot filled ${slot.group}`);
   box.append(el("div", "name", slot.player.name), el("div", "club", slot.player.club),
-             el("div", "ovr", slot.player.overall));
+             el("div", "ovr", money(slot.player.price)));
   box.append(makeButton("×", "del", () => { removeSlotPlayer(slot); render(); }));
   if (!slot.bench) {                            // solo los titulares pueden ser capitán
     const isCaptain = slot.player.id === state.captainId;
@@ -213,6 +232,9 @@ function renderCounters() {
   $("budget").textContent = money(remainingBudget());   // lo que te queda por gastar
   $("count").textContent = `${count}/${SQUAD_SIZE}`;
   $("confirmBtn").disabled = !(count === SQUAD_SIZE && state.captainId !== null);
+  if (count === SQUAD_SIZE) {                    // equipo completo: solo falta el capitán para confirmar
+    message(state.captainId === null ? "Falta elegir el capitán: tocá la C de uno de tus titulares" : "");
+  }
 }
 
 /* ----- lista de jugadores (mercado) ----- */
@@ -275,12 +297,80 @@ function buildFormationDialog() {
 }
 $("formationBtn").onclick = () => { buildFormationDialog(); $("formationDialog").showModal(); };
 
-$("confirmBtn").onclick = () => {                // por ahora solo muestra el equipo en la consola
-  const team = { name: $("teamName").value, formation: state.formation, captainId: state.captainId,
-                 starters: state.slots.filter(s => !s.bench).map(s => s.player),
-                 bench: state.slots.filter(s => s.bench).map(s => s.player) };
-  console.log("Equipo confirmado:", team);
-  message("Equipo confirmado (el detalle completo está en la consola, F12)");
+/* ----- option file (KONAMI-WIN32PES6OPT) -----
+ * Con el option file abierto, Confirmar escribe los 18 jugadores en los IDs 4000-4017.
+ * Chrome/Edge: guarda directamente sobre el archivo original (pide permiso).
+ * Otros navegadores: descarga el option file modificado.
+ * Sin option file: descarga EQUIPO.csv. */
+let optionFile = null;      // option file abierto y desencriptado (lo maneja pes6-core.js)
+let optionHandle = null;    // permiso para escribir sobre el archivo original (solo Chrome/Edge)
+
+function loadOptionFile(bytes, name) {
+  try {
+    optionFile = parseOptionFile(bytes, name);
+    setStatus(`Option file abierto: ${name}`);
+  } catch (error) {
+    optionFile = optionHandle = null;
+    setStatus("Error: " + error.message);
+  }
+}
+
+$("optionBtn").onclick = async () => {
+  if (!window.showOpenFilePicker) return $("optionInput").click();   // navegador sin permiso de escritura
+  try {
+    [optionHandle] = await window.showOpenFilePicker();
+    const file = await optionHandle.getFile();
+    loadOptionFile(new Uint8Array(await file.arrayBuffer()), file.name);
+  } catch (error) { /* el usuario canceló */ }
+};
+$("optionInput").onchange = async e => {
+  const file = e.target.files[0];
+  optionHandle = null;
+  if (file) loadOptionFile(new Uint8Array(await file.arrayBuffer()), file.name);
+};
+
+function downloadFile(name, content, type) {
+  const blob = new Blob([content], { type });
+  const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+const report = text => { message(text); setStatus(text); };   // se muestra abajo de la cancha y arriba, en la barra
+
+$("confirmBtn").onclick = async () => {
+  const teamCsv = buildTeamCsv();
+  if (!optionFile) {
+    downloadFile("EQUIPO.csv", teamCsv, "text/csv;charset=utf-8");
+    return message("EQUIPO.csv descargado (abrí un option file para modificarlo directamente)");
+  }
+  try {
+    data = optionFile.data;                              // importCsv (pes6-core.js) escribe sobre `data`
+    const { updated, warnings } = importCsv(teamCsv);    // aplica los 18 jugadores a los IDs 4000-4017
+    warnings.forEach(w => console.warn(w));
+    const bytes = buildOptionFile(optionFile);
+
+    // Verificación: se vuelve a abrir lo que se va a guardar y se controla que los jugadores estén ahí.
+    const saved = parseOptionFile(bytes, optionFile.name);
+    data = saved.data;
+    const names = state.slots.map((slot, i) => ({ expected: slot.player.name, found: playerName(FIRST_TEAM_ID + i) }));
+    data = optionFile.data;
+    const wrong = names.filter(n => n.expected.length <= 15 && n.expected !== n.found);
+    if (wrong.length) throw new Error(`falló la verificación en ${wrong.length} jugadores (ej: ${wrong[0].found})`);
+    const preview = names.slice(0, 3).map(n => n.found).join(", ");
+
+    if (optionHandle) {
+      const writable = await optionHandle.createWritable();
+      await writable.write(bytes);
+      await writable.close();
+      report(`${optionFile.name} modificado directamente y verificado: Team A ahora tiene ${preview}... (${updated} jugadores, 4000-4017)`);
+    } else {
+      downloadFile(optionFile.name, bytes, "application/octet-stream");
+      report(`${optionFile.name} descargado y verificado: Team A ahora tiene ${preview}... (${updated} jugadores, 4000-4017). Abrí el archivo descargado, no el original.`);
+    }
+  } catch (error) {
+    report("No se pudo guardar: " + error.message);
+  }
 };
 
 /* ----- carga de los CSV ----- */
