@@ -25,12 +25,13 @@ const SALARY_MULTIPLIER = 10000;         // precio = salario del PES * 10.000 (p
 /* =====================================================================
  * VALORACIÓN GLOBAL (1-99)
  * Promedio ponderado de atributos del PES. Cada puesto tiene sus pesos (suman 100),
- * en el mismo orden que RATING_COLUMNS.
+ * en el mismo orden que RATING_STATS.
  * ===================================================================== */
-const RATING_COLUMNS = ["ATTACK", "DEFENSE", "BALANCE", "STAMINA", "TOP SPEED", "ACCELERATION", "RESPONSE",
-  "AGILITY", "DRIBBLE ACCURACY", "DRIBBLE SPEED", "SHORT PASS ACCURACY", "SHORT PASS SPEED",
-  "LONG PASS ACCURACY", "LONG PASS SPEED", "SHOT ACCURACY", "SHOT POWER", "SHOT TECHNIQUE", "HEADING",
-  "JUMP", "TECHNIQUE", "AGGRESSION", "GOAL KEEPING", "MENTALITY"];
+// Atributos que entran en la valoración (mismo orden que los pesos); los nombres son los de pes6-core.js
+const RATING_STATS = ["Attack", "Defence", "Balance", "Stamina", "Speed", "Acceleration", "Response", "Agility",
+  "Dribble Accuracy", "Dribble Speed", "Short Pass Accuracy", "Short Pass Speed", "Long Pass Accuracy",
+  "Long Pass Speed", "Shot Accuracy", "Shot Power", "Shot Technique", "Heading", "Jump", "Technique",
+  "Aggression", "GK Skills", "Mentality"].map(label => ABILITY_FIELDS.find(f => f.label === label).stat);
 
 const WEIGHTS = {
   CF: [10, 0, 5, 1, 4, 4, 9, 0, 4, 1, 3, 1, 0, 0, 17, 8, 5, 10, 4, 8, 6, 0, 0],
@@ -48,32 +49,37 @@ const WEIGHTS = {
 const POSITION_WEIGHTS = { 0: WEIGHTS.GK, 2: WEIGHTS.CB, 3: WEIGHTS.CB, 4: WEIGHTS.SB, 5: WEIGHTS.DM,
   6: WEIGHTS.SB, 7: WEIGHTS.CM, 8: WEIGHTS.SM, 9: WEIGHTS.AM, 10: WEIGHTS.WG, 11: WEIGHTS.SS, 12: WEIGHTS.CF };
 
-function overallRating(raw) {
-  const weights = POSITION_WEIGHTS[raw["REGISTERED POSITION"]] || WEIGHTS.CF;   // por defecto, como CF
-  const total = RATING_COLUMNS.reduce((sum, column, i) => sum + Number(raw[column]) * weights[i], 0) / 100;
+function overallRating(id) {
+  const weights = POSITION_WEIGHTS[readStat(id, REG_POS.stat)] || WEIGHTS.CF;   // por defecto, como CF
+  const total = RATING_STATS.reduce((sum, s, i) => sum + readStat(id, s) * weights[i], 0) / 100;
   return Math.min(99, Math.max(1, Math.round(total)));
 }
 
 /* =====================================================================
- * 2. LEER EL CSV Y ARMAR LOS JUGADORES
- * Cada jugador conserva en `raw` las 100 columnas del CSV tal cual,
- * así después se pueden volver a importar al PES.
+ * 2. LEER LOS JUGADORES DEL OPTION FILE
+ * Los jugadores salen directo del option file abierto (no de un CSV), así se conserva
+ * TODO el registro de 124 bytes: pelo, cara, nombre de locución, etc.
+ * Entra al juego quien está en el plantel de un club. Se ignoran los "<...>" (duplicados o
+ * para editar), los "Player" y los equipos "Team A-R".
  * ===================================================================== */
-function parseCsv(text) {
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter(line => line.trim() !== "");
-  const headers = lines[0].split(",");
-  const players = [];
-  for (const line of lines.slice(1)) {
-    const cells = line.split(",");
-    const raw = Object.fromEntries(headers.map((header, i) => [header, cells[i]]));
-    const group = PES_POSITION_GROUP[raw["REGISTERED POSITION"]];
-    const ignored = raw.NAME.startsWith("<") || IGNORED_NAME.test(raw.NAME)       // "<" = duplicado/para editar
-                 || raw["CLUB TEAM"] === "" || IGNORED_CLUB.test(raw["CLUB TEAM"]) || !group;
-    if (ignored) continue;
-    players.push({ id: Number(raw.ID), name: raw.NAME, club: raw["CLUB TEAM"], group,
-                   overall: overallRating(raw), price: 0, finalPrice: 0, raw });
+const fieldStat = label => GENERAL_FIELDS.find(f => f.label === label).stat;
+
+function readPlayersFromOptionFile() {
+  const players = new Map();                                   // por ID (si está en dos clubes, queda el último)
+  for (const team of buildTeamList().filter(t => t.group === "Clubes" && !IGNORED_CLUB.test(t.name))) {
+    for (const { id } of getSquad(team)) {
+      if (!isValidPlayerId(id)) continue;
+      const name = playerName(id);
+      const group = PES_POSITION_GROUP[readStat(id, REG_POS.stat)];
+      if (name.startsWith("<") || IGNORED_NAME.test(name) || !group) continue;
+      const base = playerAddress(id);
+      const age = readStat(id, fieldStat("Age")) + 15, height = readStat(id, fieldStat("Height")) + 148;
+      players.set(id, { id, name, club: team.name, group, overall: overallRating(id), price: 0, finalPrice: 0,
+        info: `${NATIONS[readStat(id, fieldStat("Nationality"))]} · ${age} años · ${height} cm`,
+        record: data.slice(base, base + PLAYER_SIZE) });       // copia de los 124 bytes originales
+    }
   }
-  return players;
+  return [...players.values()];
 }
 
 // SALARIOS.csv ("id,SALARY") -> { id: salario }
@@ -154,22 +160,20 @@ function changeFormation(formation) {          // al cambiar, se reubican los ju
 }
 
 /* =====================================================================
- * EXPORTAR EL EQUIPO A EQUIPO.csv
- * Copia las 100 columnas de cada jugador tal cual, y cambia SOLO estas:
- *   ID -> 4000, 4001, ... (arquero titular, defensores, volantes, delanteros, y después el banco)
- *   CLUB TEAM -> Team A | INTERNATIONAL NUMBER -> 0 | CLASSIC NUMBER -> 0
+ * COPIAR EL EQUIPO AL OPTION FILE (Team A: IDs 4000-4017)
+ * Cada jugador elegido se copia byte a byte (los 124 bytes) sobre su lugar:
+ *   ID 4000 = arquero titular, luego defensores, volantes, delanteros y por último el banco.
  * ===================================================================== */
 const FIRST_TEAM_ID = 4000;
 
-function buildTeamCsv() {
-  const players = state.slots.map(slot => slot.player);       // el orden de los slots es el orden de los IDs
-  const headers = Object.keys(players[0].raw);                 // mismas columnas y orden que JUGADORES.csv
-  const rows = players.map((player, i) => {
-    const row = { ...player.raw, "ID": FIRST_TEAM_ID + i, "CLUB TEAM": "Team A",
-                  "INTERNATIONAL NUMBER": 0, "CLASSIC NUMBER": 0 };
-    return headers.map(header => row[header]).join(",");
+function copyTeamIntoOptionFile() {
+  // Igual que PES Editor al importar un jugador: se marcan como "editados" para que el juego use estos datos.
+  const editedFlags = [EXTRA_STATS["Name edited"], EXTRA_STATS["Call edited"], EXTRA_STATS["Shirt edited"], ABILITY_EDITED];
+  state.slots.forEach((slot, i) => {
+    const id = FIRST_TEAM_ID + i;
+    data.set(slot.player.record, playerAddress(id));
+    editedFlags.forEach(flag => writeStat(id, flag, 1));
   });
-  return [headers.join(","), ...rows].join("\r\n") + "\r\n";
 }
 
 /* =====================================================================
@@ -243,7 +247,7 @@ function playerRow(player, picked) {
   const info = el("div", "info");
   info.append(el("b", "", player.name),
               el("small", "", `${GROUP_LABEL[player.group]} - ${player.club}`),
-              el("small", "", `${player.raw.NATIONALITY} · ${player.raw.AGE} años · ${player.raw.HEIGHT} cm`));
+              el("small", "", player.info));
   row.append(el("div", `shirt ${player.group}`), info, el("div", "ovr", player.overall), el("div", "price", money(player.price)));
   row.onclick = () => {
     const error = tryAddPlayer(player);
@@ -298,21 +302,38 @@ function buildFormationDialog() {
 $("formationBtn").onclick = () => { buildFormationDialog(); $("formationDialog").showModal(); };
 
 /* ----- option file (KONAMI-WIN32PES6OPT) -----
- * Con el option file abierto, Confirmar escribe los 18 jugadores en los IDs 4000-4017.
- * Chrome/Edge: guarda directamente sobre el archivo original (pide permiso).
- * Otros navegadores: descarga el option file modificado.
- * Sin option file: descarga EQUIPO.csv. */
+ * De acá salen los jugadores. Al confirmar, los 18 elegidos se copian a los IDs 4000-4017.
+ * Chrome/Edge: se guarda directamente sobre el archivo original (pide permiso).
+ * Otros navegadores: se descarga el option file modificado. */
 let optionFile = null;      // option file abierto y desencriptado (lo maneja pes6-core.js)
 let optionHandle = null;    // permiso para escribir sobre el archivo original (solo Chrome/Edge)
+let salaries = null;        // { id: salario } leído de SALARIOS.csv
 
 function loadOptionFile(bytes, name) {
   try {
     optionFile = parseOptionFile(bytes, name);
-    setStatus(`Option file abierto: ${name}`);
+    data = optionFile.data;                      // las funciones de pes6-core.js trabajan sobre `data`
+    loadMarket();
   } catch (error) {
     optionFile = optionHandle = null;
+    state.players = [];
     setStatus("Error: " + error.message);
   }
+}
+
+function loadMarket() {                          // arma la lista de jugadores con el option file abierto
+  state.players = readPlayersFromOptionFile();
+  if (salaries) applySalaries(state.players, salaries);
+  const clubs = [...new Set(state.players.map(p => p.club))].sort((a, b) => a.localeCompare(b));
+  $("clubSelect").replaceChildren(new Option("Todos los clubes", ""), ...clubs.map(c => new Option(c, c)));
+  state.filter = { text: "", group: null, club: "", sort: "name" };
+  state.slots.forEach(slot => { slot.player = null; });   // equipo nuevo para el option file nuevo
+  changeFormation("4-4-2");
+  state.captainId = null;
+  syncGroupButtons();
+  render();
+  setStatus(`${optionFile.name}: ${state.players.length} jugadores de ${clubs.length} clubes` +
+            (salaries ? "" : " (falta SALARIOS.csv: precios en $0)"));
 }
 
 $("optionBtn").onclick = async () => {
@@ -339,69 +360,47 @@ function downloadFile(name, content, type) {
 const report = text => { message(text); setStatus(text); };   // se muestra abajo de la cancha y arriba, en la barra
 
 $("confirmBtn").onclick = async () => {
-  const teamCsv = buildTeamCsv();
-  if (!optionFile) {
-    downloadFile("EQUIPO.csv", teamCsv, "text/csv;charset=utf-8");
-    return message("EQUIPO.csv descargado (abrí un option file para modificarlo directamente)");
-  }
   try {
-    data = optionFile.data;                              // importCsv (pes6-core.js) escribe sobre `data`
-    const { updated, warnings } = importCsv(teamCsv);    // aplica los 18 jugadores a los IDs 4000-4017
-    warnings.forEach(w => console.warn(w));
+    data = optionFile.data;
+    copyTeamIntoOptionFile();
     const bytes = buildOptionFile(optionFile);
 
-    // Verificación: se vuelve a abrir lo que se va a guardar y se controla que los jugadores estén ahí.
+    // Verificación: se vuelve a abrir lo que se va a guardar y se controla nombre y pelo de cada copia.
     const saved = parseOptionFile(bytes, optionFile.name);
     data = saved.data;
-    const names = state.slots.map((slot, i) => ({ expected: slot.player.name, found: playerName(FIRST_TEAM_ID + i) }));
+    const hair = EXTRA_STATS["Hair"];
+    const copies = state.slots.map((slot, i) => ({ source: slot.player, copyId: FIRST_TEAM_ID + i }));
+    const wrong = copies.filter(c => playerName(c.copyId) !== c.source.name
+                                  || readStat(c.copyId, hair) !== readStat(c.source.id, hair));
+    const preview = copies.slice(0, 3).map(c => playerName(c.copyId)).join(", ");
     data = optionFile.data;
-    const wrong = names.filter(n => n.expected.length <= 15 && n.expected !== n.found);
-    if (wrong.length) throw new Error(`falló la verificación en ${wrong.length} jugadores (ej: ${wrong[0].found})`);
-    const preview = names.slice(0, 3).map(n => n.found).join(", ");
+    if (wrong.length) throw new Error(`falló la verificación en ${wrong.length} jugadores (ej: ${wrong[0].source.name})`);
 
     if (optionHandle) {
       const writable = await optionHandle.createWritable();
       await writable.write(bytes);
       await writable.close();
-      report(`${optionFile.name} modificado directamente y verificado: Team A ahora tiene ${preview}... (${updated} jugadores, 4000-4017)`);
+      report(`${optionFile.name} modificado directamente y verificado: Team A ahora tiene ${preview}... (4000-4017)`);
     } else {
       downloadFile(optionFile.name, bytes, "application/octet-stream");
-      report(`${optionFile.name} descargado y verificado: Team A ahora tiene ${preview}... (${updated} jugadores, 4000-4017). Abrí el archivo descargado, no el original.`);
+      report(`${optionFile.name} descargado y verificado: Team A ahora tiene ${preview}... (4000-4017). Abrí el archivo descargado, no el original.`);
     }
   } catch (error) {
     report("No se pudo guardar: " + error.message);
   }
 };
 
-/* ----- carga de los CSV ----- */
-const csvTexts = { players: null, salaries: null };
-
-function receiveCsv(text) {                      // detecta de qué archivo se trata por su encabezado
-  csvTexts[/SALARY/i.test(text.split(/\r?\n/)[0]) ? "salaries" : "players"] = text;
-}
-
-function loadData() {
-  if (!csvTexts.players) return;
-  state.players = parseCsv(csvTexts.players);
-  if (csvTexts.salaries) applySalaries(state.players, parseSalaries(csvTexts.salaries));
-  const clubs = [...new Set(state.players.map(p => p.club))].sort((a, b) => a.localeCompare(b));
-  $("clubSelect").replaceChildren(new Option("Todos los clubes", ""), ...clubs.map(c => new Option(c, c)));
-  state.filter = { text: "", group: null, club: "", sort: "name" };
-  changeFormation("4-4-2");
-  state.captainId = null;
-  syncGroupButtons();
+/* ----- salarios (SALARIOS.csv) ----- */
+function loadSalaries(text) {
+  salaries = parseSalaries(text);
+  applySalaries(state.players, salaries);
   render();
-  setStatus(`${state.players.length} jugadores de ${clubs.length} clubes` +
-            (csvTexts.salaries ? "" : " (falta SALARIOS.csv: precios en $0)"));
+  setStatus(`Salarios cargados (${Object.keys(salaries).length} jugadores)`);
 }
-
-$("csvInput").onchange = async e => {            // se pueden elegir los dos archivos juntos
-  for (const file of e.target.files) receiveCsv(await file.text());
-  loadData();
+$("csvInput").onchange = async e => {
+  if (e.target.files[0]) loadSalaries(await e.target.files[0].text());
 };
-// Si la página se abre desde un servidor, intenta cargar ambos CSV sola (con doble click no puede).
-Promise.all(["JUGADORES.csv", "SALARIOS.csv"].map(name => fetch(name).then(r => r.ok ? r.text() : Promise.reject())))
-  .then(texts => { texts.forEach(receiveCsv); loadData(); })
-  .catch(() => {});
+// Si la página se abre desde un servidor, intenta cargar SALARIOS.csv sola (con doble click no puede).
+fetch("SALARIOS.csv").then(r => r.ok ? r.text() : Promise.reject()).then(loadSalaries).catch(() => {});
 changeFormation("4-4-2");
 render();
