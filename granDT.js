@@ -160,17 +160,37 @@ function changeFormation(formation) {          // al cambiar, se reubican los ju
 }
 
 /* =====================================================================
- * COPIAR EL EQUIPO AL OPTION FILE (Team A: IDs 4000-4017)
+ * COPIAR EL EQUIPO AL OPTION FILE
+ * Equipos del PES 6 que se pueden reemplazar y el ID de su primer jugador (cada uno tiene 18).
  * Cada jugador elegido se copia byte a byte (los 124 bytes) sobre su lugar:
- *   ID 4000 = arquero titular, luego defensores, volantes, delanteros y por último el banco.
+ *   primer ID = arquero titular, luego defensores, volantes, delanteros y por último el banco.
  * ===================================================================== */
-const FIRST_TEAM_ID = 4000;
+const PES_TEAMS = [
+  { name: "Team A", firstId: 4000 },
+  { name: "Team B", firstId: 4023 },
+  { name: "Team C", firstId: 4046 },
+  { name: "Team D", firstId: 4069 },
+  { name: "Team E", firstId: 4092 },
+  { name: "Team F", firstId: 4115 },
+  { name: "Team G", firstId: 4138 },
+  { name: "Team H", firstId: 4161 },
+  { name: "Team I", firstId: 4184 },
+  { name: "Team J", firstId: 4207 },
+  { name: "Team K", firstId: 4230 },
+  { name: "Team L", firstId: 4253 },
+  { name: "Team M", firstId: 4276 },
+  { name: "Team N", firstId: 4299 },
+  { name: "Team O", firstId: 4322 },
+  { name: "Team P", firstId: 4345 },
+  { name: "Team Q", firstId: 4368 },
+  { name: "Team R", firstId: 4391 }
+];
 
-function copyTeamIntoOptionFile() {
+function copyTeamIntoOptionFile(firstId) {
   // Igual que PES Editor al importar un jugador: se marcan como "editados" para que el juego use estos datos.
   const editedFlags = [EXTRA_STATS["Name edited"], EXTRA_STATS["Call edited"], EXTRA_STATS["Shirt edited"], ABILITY_EDITED];
   state.slots.forEach((slot, i) => {
-    const id = FIRST_TEAM_ID + i;
+    const id = firstId + i;
     data.set(slot.player.record, playerAddress(id));
     editedFlags.forEach(flag => writeStat(id, flag, 1));
   });
@@ -302,7 +322,7 @@ function buildFormationDialog() {
 $("formationBtn").onclick = () => { buildFormationDialog(); $("formationDialog").showModal(); };
 
 /* ----- option file (KONAMI-WIN32PES6OPT) -----
- * De acá salen los jugadores. Al confirmar, los 18 elegidos se copian a los IDs 4000-4017.
+ * De acá salen los jugadores. Al confirmar, los 18 elegidos se copian a los IDs del equipo PES elegido (Team A-R).
  * Chrome/Edge: se guarda directamente sobre el archivo original (pide permiso).
  * Otros navegadores: se descarga el option file modificado. */
 let optionFile = null;      // option file abierto y desencriptado (lo maneja pes6-core.js)
@@ -359,19 +379,34 @@ function downloadFile(name, content, type) {
 
 const report = text => { message(text); setStatus(text); };   // se muestra abajo de la cancha y arriba, en la barra
 
-$("confirmBtn").onclick = async () => {
+// Al confirmar se pregunta qué equipo del PES reemplazar (se muestra quién juega hoy en cada uno).
+$("confirmBtn").onclick = () => {
+  if (!optionFile) return message("Primero abrí el option file");
+  data = optionFile.data;
+  $("teamGrid").replaceChildren(...PES_TEAMS.map(team => {
+    const button = makeButton(team.name, "", () => { $("teamDialog").close(); saveTeam(team); });
+    button.append(el("small", "", `IDs ${team.firstId}-${team.firstId + SQUAD_SIZE - 1}`),
+                  el("small", "", `Hoy: ${playerName(team.firstId)}`));
+    return button;
+  }));
+  $("teamDialog").showModal();
+};
+$("teamCancel").onclick = () => $("teamDialog").close();
+
+async function saveTeam(team) {
   try {
     data = optionFile.data;
-    copyTeamIntoOptionFile();
+    copyTeamIntoOptionFile(team.firstId);
     const bytes = buildOptionFile(optionFile);
 
     // Verificación: se vuelve a abrir lo que se va a guardar y se controla nombre y pelo de cada copia.
     const saved = parseOptionFile(bytes, optionFile.name);
     data = saved.data;
     const hair = EXTRA_STATS["Hair"];
-    const copies = state.slots.map((slot, i) => ({ source: slot.player, copyId: FIRST_TEAM_ID + i }));
+    const copies = state.slots.map((slot, i) => ({ source: slot.player, copyId: team.firstId + i }));
     const wrong = copies.filter(c => playerName(c.copyId) !== c.source.name
                                   || readStat(c.copyId, hair) !== readStat(c.source.id, hair));
+    const range = `IDs ${team.firstId}-${team.firstId + SQUAD_SIZE - 1}`;
     const preview = copies.slice(0, 3).map(c => playerName(c.copyId)).join(", ");
     data = optionFile.data;
     if (wrong.length) throw new Error(`falló la verificación en ${wrong.length} jugadores (ej: ${wrong[0].source.name})`);
@@ -380,15 +415,15 @@ $("confirmBtn").onclick = async () => {
       const writable = await optionHandle.createWritable();
       await writable.write(bytes);
       await writable.close();
-      report(`${optionFile.name} modificado directamente y verificado: Team A ahora tiene ${preview}... (4000-4017)`);
+      report(`${optionFile.name} modificado directamente y verificado: ${team.name} ahora tiene ${preview}... (${range})`);
     } else {
       downloadFile(optionFile.name, bytes, "application/octet-stream");
-      report(`${optionFile.name} descargado y verificado: Team A ahora tiene ${preview}... (4000-4017). Abrí el archivo descargado, no el original.`);
+      report(`${optionFile.name} descargado y verificado: ${team.name} ahora tiene ${preview}... (${range}). Abrí el archivo descargado, no el original.`);
     }
   } catch (error) {
     report("No se pudo guardar: " + error.message);
   }
-};
+}
 
 /* ----- salarios (SALARIOS.csv) ----- */
 function loadSalaries(text) {
