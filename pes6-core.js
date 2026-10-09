@@ -116,6 +116,7 @@ function parseOptionFile(bytes, fileName) {
   const data = bytes.slice(dataStart, dataStart + DATA_LENGTH);
   if (isPC) xorPC(data);
   decryptData(data);
+  fixSquads(data);                 // igual que PES Editor al abrir un archivo (ver "Normalizar planteles")
   return {
     name: fileName, isPC, data,
     header: bytes.slice(0, dataStart),
@@ -208,6 +209,42 @@ function getSquad(team) {
     });
   }
   return squad;
+}
+
+/* ===== Normalizar planteles (port de Squads.fixAll de PES Editor) =====
+ * Cada plantel tiene una lista de jugadores y un "mapa de formación" que dice qué lugar de la lista
+ * juega en cada posición. En un archivo original el mapa puede ser cualquier permutación.
+ * PES Editor, al abrir un archivo, reordena la lista según el mapa y deja el mapa en 0,1,2...31
+ * (lo mismo hace con los números de camiseta y con los "jobs": capitán, tiros libres, etc.).
+ * El plantel visible no cambia, pero el archivo queda tal cual lo guarda PES Editor. */
+const JOBS_OFFSET = 111, JOB_COUNT = 6;      // dentro de cada formación: 6 bytes con lugares de la lista
+
+function fixSquads(data) {
+  for (let s = 0; s < 213; s++) {
+    if (s >= 64 && s < 73) continue;            // 0-63 selecciones, 73-212 clubes
+    const isNation = s < 64;
+    const size = isNation ? 23 : 32;
+    const slotsAddress = isNation ? 664372 + s * size * 2 : 667730 + (s - 73) * size * 2;
+    const numbersAddress = isNation ? 657956 + s * size : 659635 + (s - 73) * size;
+    const formation = FORMATIONS_ADDRESS + FORMATION_SIZE * (isNation ? s : s - 9);
+    const mapAt = i => formation + 6 + i;       // mapa: posición i juega el lugar data[mapAt(i)] de la lista
+
+    const oldSlots = new Uint8Array(64); oldSlots.set(data.subarray(slotsAddress, slotsAddress + size * 2));
+    const oldNumbers = new Uint8Array(32); oldNumbers.set(data.subarray(numbersAddress, numbersAddress + size));
+    for (let p = 0; p < size; p++) {
+      const slot = data[mapAt(p)] < 32 ? data[mapAt(p)] : p;
+      data[slotsAddress + p * 2] = oldSlots[slot * 2];
+      data[slotsAddress + p * 2 + 1] = oldSlots[slot * 2 + 1];
+      data[numbersAddress + p] = oldNumbers[slot];
+    }
+    for (let j = 0; j < JOB_COUNT; j++) {       // los jobs apuntan a un lugar de la lista: pasan a la posición nueva
+      const job = formation + JOBS_OFFSET + j;
+      for (let i = 0; i < 32; i++) {
+        if (data[mapAt(i)] === data[job]) { data[job] = i; break; }
+      }
+    }
+    for (let i = 0; i < 32; i++) data[mapAt(i)] = i;   // mapa identidad
+  }
 }
 
 /* =====================================================================
@@ -414,4 +451,3 @@ function importCsv(text) {
   }
   return { updated, warnings };
 }
-
