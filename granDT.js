@@ -11,7 +11,6 @@ const LIST_LIMIT = 120;          // máximo de jugadores dibujados en la lista
 const GROUP_ORDER = ["GK", "DEF", "MID", "FWD"];
 const GROUP_LABEL = { GK: "ARQ", DEF: "DEF", MID: "VOL", FWD: "DEL" };
 const BENCH = { GK: 1, DEF: 2, MID: 2, FWD: 2 };          // suplentes obligatorios por puesto
-const FORMATIONS = ["4-4-2", "4-3-3", "3-4-3", "4-5-1", "3-5-2", "5-3-2", "3-3-4", "4-2-4", "5-2-3"];
 
 // Posición registrada de PES (columna REGISTERED POSITION) -> puesto del Gran DT
 //   GK | CWP-CBT-SB | DM-WB-CM-SM-AM | WG-SS-CF
@@ -165,6 +164,21 @@ function changeFormation(formation) {          // al cambiar, se reubican los ju
  * Cada jugador elegido se copia byte a byte (los 124 bytes) sobre su lugar:
  *   primer ID = arquero titular, luego defensores, volantes, delanteros y por último el banco.
  * ===================================================================== */
+/* Formaciones del PES 6 (una sola variante, la "A", de las que ofrece PES Editor en FormPanel.java).
+ * Son 31 bytes por formación: 20 de coordenadas (x,y de los jugadores 2 al 11) y 11 de roles (0 = arquero).
+ * Los lugares van ordenados igual que los slots del Gran DT: arquero, defensores, volantes, delanteros. */
+const PES_FORMATIONS = {
+  "4-4-2": [9, 63, 9, 41, 11, 85, 11, 19, 18, 52, 26, 75, 26, 29, 34, 52, 43, 66, 43, 38, 0, 7, 1, 9, 8, 12, 23, 22, 26, 40, 36],
+  "4-3-3": [9, 63, 9, 41, 11, 85, 11, 19, 18, 52, 30, 64, 30, 40, 43, 72, 43, 32, 43, 52, 0, 7, 1, 9, 8, 12, 28, 24, 30, 29, 38],
+  "3-4-3": [9, 72, 9, 52, 9, 32, 18, 52, 26, 77, 26, 27, 34, 52, 43, 72, 43, 32, 43, 52, 0, 7, 3, 1, 12, 23, 22, 26, 30, 29, 38],
+  "4-5-1": [9, 63, 9, 41, 11, 85, 11, 19, 18, 52, 26, 75, 26, 29, 34, 64, 34, 40, 43, 52, 0, 7, 1, 9, 8, 12, 23, 22, 28, 24, 38],
+  "3-5-2": [9, 72, 9, 52, 9, 32, 18, 52, 26, 77, 26, 27, 34, 64, 34, 40, 43, 66, 43, 38, 0, 7, 3, 1, 12, 23, 22, 28, 24, 40, 36],
+  "5-3-2": [9, 72, 9, 52, 9, 32, 12, 87, 12, 17, 18, 52, 34, 64, 34, 40, 43, 66, 43, 38, 0, 7, 3, 1, 9, 8, 12, 28, 24, 40, 36],
+  "5-4-1": [9, 72, 9, 52, 9, 32, 12, 87, 12, 17, 18, 52, 26, 75, 26, 29, 34, 52, 43, 52, 0, 7, 3, 1, 9, 8, 12, 23, 22, 26, 38],
+  "3-6-1": [9, 72, 9, 52, 9, 32, 18, 52, 26, 52, 26, 77, 26, 27, 34, 64, 34, 40, 43, 52, 0, 7, 3, 1, 12, 19, 23, 22, 28, 24, 38]
+};
+const FORMATIONS = Object.keys(PES_FORMATIONS);
+
 const PES_TEAMS = [
   { name: "Team A", firstId: 4000 },
   { name: "Team B", firstId: 4023 },
@@ -194,6 +208,50 @@ function copyTeamIntoOptionFile(firstId) {
     data.set(slot.player.record, playerAddress(id));
     editedFlags.forEach(flag => writeStat(id, flag, 1));
   });
+}
+
+/* Team A-R son clubes del PES. Se encuentra el club por su primer jugador (no por el nombre, que ahora se puede cambiar).
+ * Como fixSquads ya dejó el plantel ordenado, el lugar i del plantel es el lugar i de la formación. */
+const CLUB_SQUAD_ADDRESS = 667730, CLUB_NAME_ADDRESS = 751472, CLUB_RECORD_SIZE = 88;
+const CAPTAIN_JOB = 5, OVERLAP_CB_OFFSET = 106, PLAN_OFFSET = 118, ROLES_OFFSET = 138;
+
+function findClubOfPlayer(playerId) {
+  for (let club = 0; club < 140; club++) {
+    for (let p = 0; p < 32; p++) if (u16(CLUB_SQUAD_ADDRESS + club * 64 + p * 2) === playerId) return club;
+  }
+  return -1;
+}
+
+const formationAddress = club => FORMATIONS_ADDRESS + FORMATION_SIZE * (64 + club);   // los clubes van después de las 64 selecciones
+
+function checkClubSquad(club, firstId) {         // los 18 lugares tienen que ser firstId, firstId+1, ...
+  for (let i = 0; i < SQUAD_SIZE; i++) {
+    if (u16(CLUB_SQUAD_ADDRESS + club * 64 + i * 2) !== firstId + i) throw new Error("el plantel de ese equipo no tiene el orden original");
+  }
+}
+
+function setFormation(club, formation) {        // lo mismo que elegir la formación en PES Editor (plan "Normal")
+  const address = formationAddress(club);
+  data.set(PES_FORMATIONS[formation], address + PLAN_OFFSET);
+  const overlapRole = data[address + ROLES_OFFSET + data[address + OVERLAP_CB_OFFSET]];
+  if (overlapRole < 1 || overlapRole > 7) data[address + OVERLAP_CB_OFFSET] = 0;   // PES Editor lo limpia si ya no es defensor
+}
+
+function setCaptain(club, slotIndex) { data[formationAddress(club) + JOBS_OFFSET + CAPTAIN_JOB] = slotIndex; }
+
+const fitClubName = name => {                    // el nombre del club ocupa como máximo 48 bytes (UTF-8)
+  while (new TextEncoder().encode(name).length > 48) name = name.slice(0, -1);
+  return name;
+};
+
+function setClubName(club, name) {              // Clubs.setName / setAbv de PES Editor
+  const start = CLUB_NAME_ADDRESS + club * CLUB_RECORD_SIZE;
+  const encoder = new TextEncoder();
+  data.fill(0, start, start + 49);
+  data.set(encoder.encode(name), start);
+  data[start + 56] = 1;                          // "nombre editado"
+  const abbreviation = name.normalize("NFD").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3);
+  if (abbreviation.length === 3) data.set(encoder.encode(abbreviation), start + 49);   // sigla de 3 letras
 }
 
 /* =====================================================================
@@ -366,6 +424,7 @@ $("optionBtn").onclick = async () => {
 };
 $("optionInput").onchange = async e => {
   const file = e.target.files[0];
+  console.log(file)
   optionHandle = null;
   if (file) loadOptionFile(new Uint8Array(await file.arrayBuffer()), file.name);
 };
@@ -379,14 +438,20 @@ function downloadFile(name, content, type) {
 
 const report = text => { message(text); setStatus(text); };   // se muestra abajo de la cancha y arriba, en la barra
 
-// Al confirmar se pregunta qué equipo del PES reemplazar (se muestra quién juega hoy en cada uno).
+// Al confirmar se pregunta qué equipo del PES reemplazar (se muestra cómo se llama hoy cada uno).
+const captainSlotIndex = () => state.slots.findIndex(s => s.player && s.player.id === state.captainId);
+const newTeamName = () => $("teamName").value.trim() || "Mi equipo";
+
 $("confirmBtn").onclick = () => {
   if (!optionFile) return message("Primero abrí el option file");
   data = optionFile.data;
+  $("teamSummary").textContent = `Se guarda como "${newTeamName()}" · ${state.formation} · ` +
+                                 `Capitán: ${state.slots[captainSlotIndex()].player.name}`;
   $("teamGrid").replaceChildren(...PES_TEAMS.map(team => {
+    const club = findClubOfPlayer(team.firstId);
     const button = makeButton(team.name, "", () => { $("teamDialog").close(); saveTeam(team); });
     button.append(el("small", "", `IDs ${team.firstId}-${team.firstId + SQUAD_SIZE - 1}`),
-                  el("small", "", `Hoy: ${playerName(team.firstId)}`));
+                  el("small", "", club < 0 ? "No encontrado" : `Hoy: ${clubName(club)}`));
     return button;
   }));
   $("teamDialog").showModal();
@@ -396,7 +461,14 @@ $("teamCancel").onclick = () => $("teamDialog").close();
 async function saveTeam(team) {
   try {
     data = optionFile.data;
+    const club = findClubOfPlayer(team.firstId);
+    if (club < 0) throw new Error(`no encontré a ${team.name} en el option file`);
+    checkClubSquad(club, team.firstId);
+    const name = fitClubName(newTeamName()), captainSlot = captainSlotIndex();
     copyTeamIntoOptionFile(team.firstId);
+    setFormation(club, state.formation);
+    setCaptain(club, captainSlot);
+    setClubName(club, name);
     const bytes = buildOptionFile(optionFile);
 
     // Verificación: se vuelve a abrir lo que se va a guardar y se controla nombre y pelo de cada copia.
@@ -406,8 +478,12 @@ async function saveTeam(team) {
     const copies = state.slots.map((slot, i) => ({ source: slot.player, copyId: team.firstId + i }));
     const wrong = copies.filter(c => playerName(c.copyId) !== c.source.name
                                   || readStat(c.copyId, hair) !== readStat(c.source.id, hair));
+    const formationBytes = data.subarray(formationAddress(club) + PLAN_OFFSET, formationAddress(club) + PLAN_OFFSET + 31);
+    if (formationBytes.some((b, i) => b !== PES_FORMATIONS[state.formation][i])) throw new Error("la formación no quedó bien guardada");
+    if (data[formationAddress(club) + JOBS_OFFSET + CAPTAIN_JOB] !== captainSlot) throw new Error("el capitán no quedó bien guardado");
+    if (clubName(club) !== name) throw new Error("el nombre del equipo no quedó bien guardado");
     const range = `IDs ${team.firstId}-${team.firstId + SQUAD_SIZE - 1}`;
-    const preview = copies.slice(0, 3).map(c => playerName(c.copyId)).join(", ");
+    const summary = `"${name}" (${team.name}, ${range}) · ${state.formation} · capitán ${state.slots[captainSlot].player.name}`;
     data = optionFile.data;
     if (wrong.length) throw new Error(`falló la verificación en ${wrong.length} jugadores (ej: ${wrong[0].source.name})`);
 
@@ -415,10 +491,10 @@ async function saveTeam(team) {
       const writable = await optionHandle.createWritable();
       await writable.write(bytes);
       await writable.close();
-      report(`${optionFile.name} modificado directamente y verificado: ${team.name} ahora tiene ${preview}... (${range})`);
+      report(`${optionFile.name} modificado directamente y verificado: ${summary}`);
     } else {
       downloadFile(optionFile.name, bytes, "application/octet-stream");
-      report(`${optionFile.name} descargado y verificado: ${team.name} ahora tiene ${preview}... (${range}). Abrí el archivo descargado, no el original.`);
+      report(`${optionFile.name} descargado y verificado: ${summary}. Abrí el archivo descargado, no el original.`);
     }
   } catch (error) {
     report("No se pudo guardar: " + error.message);
@@ -439,3 +515,21 @@ $("csvInput").onchange = async e => {
 fetch("SALARIOS.csv").then(r => r.ok ? r.text() : Promise.reject()).then(loadSalaries).catch(() => {});
 changeFormation("4-4-2");
 render();
+
+
+// const file = 
+fetch("KONAMI-WIN32PES6OPT")
+  .then(r => r.blob())
+  .then(async blob => {
+    const file = new File(
+      [blob],
+      "KONAMI-WIN32PES6OPT",
+      {
+        type: blob.type,
+        lastModified: new Date("2026-10-04T12:57:44-03:00").getTime()
+      }
+    );
+
+    optionHandle = null;
+    if (file) loadOptionFile(new Uint8Array(await file.arrayBuffer()), file.name);
+  });
