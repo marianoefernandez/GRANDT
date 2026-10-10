@@ -21,6 +21,11 @@
     <div id="bench"></div>
     <div id="bar">
       <div class="teamName"><small>ARMÁ TU EQUIPO</small><input id="teamName" value="Mi equipo"></div>
+      <label id="emblemBtn" title="Escudo del equipo: cualquier imagen (se pasa a 64x64 con colores indexados)">
+        <canvas id="emblemPreview" width="64" height="64"></canvas><small>Escudo PNG</small>
+        <input type="file" id="emblemInput" accept="image/*" hidden>
+      </label>
+      <button id="emblemClear" class="light" title="Quitar el escudo" hidden>×</button>
       <button id="formationBtn" class="light"></button>
       <button id="confirmBtn" disabled>Confirmar equipo</button>
     </div>
@@ -66,6 +71,7 @@
 </dialog>
 
 <script src="pes6-core.js"></script>
+<script src="emblems.js"></script>
 <script src="granDT.js"></script>
 </body>
 </html>

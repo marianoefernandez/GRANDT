@@ -424,7 +424,6 @@ $("optionBtn").onclick = async () => {
 };
 $("optionInput").onchange = async e => {
   const file = e.target.files[0];
-  console.log(file)
   optionHandle = null;
   if (file) loadOptionFile(new Uint8Array(await file.arrayBuffer()), file.name);
 };
@@ -438,6 +437,32 @@ function downloadFile(name, content, type) {
 
 const report = text => { message(text); setStatus(text); };   // se muestra abajo de la cancha y arriba, en la barra
 
+/* ----- escudo: cualquier imagen se convierte a 64x64 con paleta (ver emblems.js) ----- */
+let emblem = null;                               // null = el equipo conserva el escudo que tiene
+
+function showEmblem() {
+  const context = $("emblemPreview").getContext("2d");
+  context.clearRect(0, 0, EMBLEM_SIZE, EMBLEM_SIZE);
+  if (emblem) context.putImageData(new ImageData(emblemToRgba(emblem), EMBLEM_SIZE, EMBLEM_SIZE), 0, 0);
+  $("emblemBtn").classList.toggle("empty", !emblem);
+  $("emblemClear").hidden = !emblem;
+}
+
+$("emblemInput").onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = "";                           // así se puede volver a elegir el mismo archivo
+  if (!file) return;
+  try {
+    emblem = await imageToEmblem(file);
+    message(`Escudo listo: 64x64, ${emblem.palette.length} colores + transparente`);
+  } catch (error) {
+    message("No pude abrir esa imagen");
+  }
+  showEmblem();
+};
+$("emblemClear").onclick = () => { emblem = null; showEmblem(); };
+showEmblem();
+
 // Al confirmar se pregunta qué equipo del PES reemplazar (se muestra cómo se llama hoy cada uno).
 const captainSlotIndex = () => state.slots.findIndex(s => s.player && s.player.id === state.captainId);
 const newTeamName = () => $("teamName").value.trim() || "Mi equipo";
@@ -446,7 +471,7 @@ $("confirmBtn").onclick = () => {
   if (!optionFile) return message("Primero abrí el option file");
   data = optionFile.data;
   $("teamSummary").textContent = `Se guarda como "${newTeamName()}" · ${state.formation} · ` +
-                                 `Capitán: ${state.slots[captainSlotIndex()].player.name}`;
+                                 `Capitán: ${state.slots[captainSlotIndex()].player.name} · Escudo: ${emblem ? "nuevo" : "sin cambios"}`;
   $("teamGrid").replaceChildren(...PES_TEAMS.map(team => {
     const club = findClubOfPlayer(team.firstId);
     const button = makeButton(team.name, "", () => { $("teamDialog").close(); saveTeam(team); });
@@ -459,6 +484,7 @@ $("confirmBtn").onclick = () => {
 $("teamCancel").onclick = () => $("teamDialog").close();
 
 async function saveTeam(team) {
+  const backup = optionFile.data.slice();         // si algo falla se deja el option file abierto como estaba
   try {
     data = optionFile.data;
     const club = findClubOfPlayer(team.firstId);
@@ -469,6 +495,7 @@ async function saveTeam(team) {
     setFormation(club, state.formation);
     setCaptain(club, captainSlot);
     setClubName(club, name);
+    if (emblem) setClubEmblem(club, emblem);
     const bytes = buildOptionFile(optionFile);
 
     // Verificación: se vuelve a abrir lo que se va a guardar y se controla nombre y pelo de cada copia.
@@ -482,8 +509,13 @@ async function saveTeam(team) {
     if (formationBytes.some((b, i) => b !== PES_FORMATIONS[state.formation][i])) throw new Error("la formación no quedó bien guardada");
     if (data[formationAddress(club) + JOBS_OFFSET + CAPTAIN_JOB] !== captainSlot) throw new Error("el capitán no quedó bien guardado");
     if (clubName(club) !== name) throw new Error("el nombre del equipo no quedó bien guardado");
+    if (emblem) {
+      const stored = readClubEmblemRgba(club), expected = emblemToRgba(emblem);
+      if (!stored || stored.some((value, i) => value !== expected[i])) throw new Error("el escudo no quedó bien guardado");
+    }
     const range = `IDs ${team.firstId}-${team.firstId + SQUAD_SIZE - 1}`;
-    const summary = `"${name}" (${team.name}, ${range}) · ${state.formation} · capitán ${state.slots[captainSlot].player.name}`;
+    const summary = `"${name}" (${team.name}, ${range}) · ${state.formation} · capitán ${state.slots[captainSlot].player.name}` +
+                    (emblem ? " · escudo nuevo" : "");
     data = optionFile.data;
     if (wrong.length) throw new Error(`falló la verificación en ${wrong.length} jugadores (ej: ${wrong[0].source.name})`);
 
@@ -497,6 +529,8 @@ async function saveTeam(team) {
       report(`${optionFile.name} descargado y verificado: ${summary}. Abrí el archivo descargado, no el original.`);
     }
   } catch (error) {
+    optionFile.data.set(backup);
+    data = optionFile.data;
     report("No se pudo guardar: " + error.message);
   }
 }
@@ -515,7 +549,6 @@ $("csvInput").onchange = async e => {
 fetch("SALARIOS.csv").then(r => r.ok ? r.text() : Promise.reject()).then(loadSalaries).catch(() => {});
 changeFormation("4-4-2");
 render();
-
 
 // const file = 
 fetch("KONAMI-WIN32PES6OPT")
